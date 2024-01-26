@@ -49,27 +49,18 @@ public class Play(int row, int col)
 /* Store information of a game state */
 public class State(List<Play> history, Player[,] board, Player player)
 {
-    public List<Play> history = history;
+    public readonly List<Play> history = history;
     public readonly Player player = player;
-    public Player[,] board = board;
-
-    public bool IsPlayer(Player player)
-    {
-        return this.player == player;
-    }
+    public readonly Player[,] board = board;
 }
 
 public class Game
 {
     /* Generate and return the initial game state */
-    public static State Start(Player player)
-    {
-        Player[,] newBoard = new Player[3, 3];
-        return new State([], newBoard, player);
-    }
+    public static State Init(Player player) => new([], new Player[3, 3], player);
 
     /* Return the current player's legal plays from given state */
-    public static List<Play> LegalPlays(State state)
+    public static List<Play> GetLegalPlays(State state)
     {
         List<Play> legalPlays = [];
 
@@ -82,20 +73,20 @@ public class Game
     }
 
     /* Advance the given state and return it */
-    public static State NextState(State state, Play play)
+    public static State GetNextState(State currentState, Play play)
     {
         // copy history to new list & push play to it
-        List<Play> newHistory = new(state.history) { play };
+        List<Play> newHistory = new(currentState.history) { play };
         // copy board to new array
-        Player[,] newBoard = (Player[,])state.board.Clone();
+        Player[,] newBoard = (Player[,])currentState.board.Clone();
         // apply the play on new board
-        newBoard[play.row, play.col] = state.player;
+        newBoard[play.row, play.col] = currentState.player;
         // create new state of new history & new board, player is changed since this is next turn
-        return new State(newHistory, newBoard, state.player.Opposite());
+        return new State(newHistory, newBoard, currentState.player.Opposite());
     }
 
     /* Check and return the winner of the game */
-    public static Player Winner(State state)
+    public static Player CheckWinner(State state)
     {
         for (int i = 0; i < 3; i++)
         {

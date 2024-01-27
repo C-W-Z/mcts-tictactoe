@@ -1,204 +1,168 @@
 namespace MCTS;
 
 /* Monte Carlo Search Tree Node (using UCB1) */
-public class Node
+class Node
 {
-    public Play? play;
-    public State state;
-    public int wins;
-    public int plays;
+    public State state; // 這個node代表的state: 現在的局面和現在是誰要下下一步棋
+    public Play? parentPlayerPlay; // (上個人下的)上一步棋是什麼
+    public int parentPlayerWins; // 這個Node(含)以下的模擬中，上個人贏了幾次
+    public int totalPlays; // 這個Node(含)以下模擬了幾次
     public Node? parent;
-    public Dictionary<string, Tuple<Play, Node?>> children;
+    public List<Node> children;
 
-    public Node(Play? play, State state, Node? parent, List<Play> unexpandedPlays)
+    public Node(Node? parent, Play? parentPlay, State state)
     {
-        this.play = play;
+        this.parentPlayerPlay = parentPlay;
         this.state = state;
         this.parent = parent;
-        this.wins = 0;
-        this.plays = 0;
+        this.parentPlayerWins = 0;
+        this.totalPlays = 0;
         this.children = [];
-        foreach (var p in unexpandedPlays)
-            children.Add(p.Hash(), new(p, null));
-    }
-
-    public Node GetChildNode(Play play)
-    {
-        if (children.TryGetValue(play.Hash(), out var tuple))
-        {
-            if (tuple.Item2 == null)
-                throw new Exception("Such child is not expanded.");
-            return tuple.Item2;
-        }
-        throw new Exception("No such play.");
-    }
-
-    public Node Expand(Play play, State state, List<Play> unexpandedPlays)
-    {
-        Node child = new(play, state, this, unexpandedPlays);
-        children[play.Hash()] = new(play, child);
-        return child;
-    }
-
-    public List<Play> GetAllPlays()
-    {
-        List<Play> allPlays = [];
-        foreach (var tuple in children.Values)
-            allPlays.Add(tuple.Item1);
-        return allPlays;
-    }
-
-    public List<Play> GetUnexpandedPlays()
-    {
-        List<Play> unexpandedPlays = [];
-        foreach (var tuple in children.Values)
-            if (tuple.Item2 == null)
-                unexpandedPlays.Add(tuple.Item1);
-        return unexpandedPlays;
-    }
-
-    public bool IsFullyExpanded()
-    {
-        foreach (var tuple in children.Values)
-            if (tuple.Item2 == null)
-                return false;
-        return true;
     }
 
     public bool IsLeaf => children.Count == 0;
 
     public double UCB1(double UCB1ExploreParam)
     {
-        if (parent == null)
+        if (parent == null) // no needs to explore root node since it is the current actual game state
             return 0;
-        return (double)wins / plays + Math.Sqrt(UCB1ExploreParam * Math.Log10(parent.plays) / plays);
+        if (totalPlays == 0) // if this node has not explored yet
+            return double.MaxValue;
+        if (parentPlayerWins == int.MinValue)
+            return double.MinValue;
+        double exploit = (double)parentPlayerWins / totalPlays;
+        double explore = Math.Sqrt(UCB1ExploreParam * Math.Log(parent.totalPlays) / totalPlays);
+        return exploit + explore;
+    }
+
+    public Node FindMaxUCB1Child(double UCB1ExploreParam)
+    {
+        Node res = children[0];
+        double maxUCB = double.MinValue;
+        foreach (var n in children)
+        {
+            double newUCB = n.UCB1(UCB1ExploreParam);
+            if (newUCB > maxUCB)
+            {
+                res = n;
+                maxUCB = newUCB;
+            }
+        }
+        // if (res == null)
+        //     throw new Exception("Child not found");
+        return res;
+    }
+
+    public Node GetRandomChild()
+    {
+        Random rng = new(Guid.NewGuid().GetHashCode());
+        return children[rng.Next(0, children.Count - 1)];
     }
 }
 
-public enum UCTPolicy { Random, WinRate, MaxPlay }
+public enum Policy { WinRate, MaxPlay }
 
 /* Monte Carlo Search Tree (using UCB1) */
-public class UCT(int UCB1ExploreParam = 2)
+class UCT(Node root, int UCB1ExploreParam = 2)
 {
     // The square of the bias parameter in the UCB1 algorithm
     readonly int UCB1ExploreParam = UCB1ExploreParam;
-    public readonly Dictionary<string, Node> nodes = [];
-
     readonly Random rng = new(Guid.NewGuid().GetHashCode());
+    readonly Node root = root;
 
-    public void MakeNode(State state)
+    public Play GetBestPlay(Policy policy)
     {
-        if (nodes.ContainsKey(state.Hash()))
-            return;
-        List<Play> unexpandedPlays = Game.GetLegalPlays(state);
-        Node node = new(null, state, null, unexpandedPlays);
-        nodes.TryAdd(state.Hash(), node);
-    }
-
-    public void RunSearch(State state, int time = 1000)
-    {
-        MakeNode(state);
-
-        while (time-- > 0)
-        {
-            Node node = Select(state);
-            Player winner = Game.CheckWinner(node.state);
-            if (!node.IsLeaf && winner == Player.NONE) {
-                node = Expand(node);
-                winner = Simulate(node);
-            }
-            Backpropagate(node, winner);
-        }
-    }
-
-    public Play GetBestPlay(State state, UCTPolicy policy = UCTPolicy.MaxPlay)
-    {
-        MakeNode(state);
-
-        // If not all children are expanded, not enough information
-        if (!nodes[state.Hash()].IsFullyExpanded())
-            throw new Exception("Not enough information!");
-
-        Node node = nodes[state.Hash()];
-        List<Play> allPlays = node.GetAllPlays();
-
-        Play bestPlay = allPlays[rng.Next(0, allPlays.Count - 1)];
-
-        if (policy == UCTPolicy.Random)
-            return bestPlay;
-
+        Play? bestPlay = null;
         double max = double.MinValue;
-        foreach (var p in allPlays)
+        foreach (var child in root.children)
         {
-            Node child = node.GetChildNode(p);
-
-            if (policy == UCTPolicy.WinRate)
+            if (policy == Policy.MaxPlay && child.totalPlays > max)
             {
-                double winrate = (double)child.wins / child.plays;
-                if (winrate > max)
+                bestPlay = child.parentPlayerPlay;
+                max = child.totalPlays;
+            }
+            else if (policy == Policy.WinRate)
+            {
+                double rate = (double)child.parentPlayerWins / child.totalPlays;
+                if (rate > max)
                 {
-                    bestPlay = p;
-                    max = winrate;
+                    bestPlay = child.parentPlayerPlay;
+                    max = rate;
                 }
             }
-            else if (policy == UCTPolicy.MaxPlay && child.plays > max)
-            {
-                bestPlay = p;
-                max = child.plays;
-            }
-        }
 
-        return bestPlay;
+            // Console.WriteLine(child.parentPlayerPlay?.ToStr() + ":" + child.parentPlayerWins + "/" + child.totalPlays);
+        }
+        if (bestPlay == null)
+            throw new Exception("Play not found");
+        return (Play)bestPlay;
     }
 
-    public Node Select(State state)
+    public void Search(int iteration)
     {
-        Node node = nodes[state.Hash()];
-        while (!node.IsLeaf && node.IsFullyExpanded())
+        while (iteration-- > 0)
+            Iterate();
+    }
+    
+    void Iterate()
+    {
+        Node leaf = Select(root);
+        Player winner = Game.CheckWinner(leaf.state);
+        if (winner == Player.NONE)
         {
-            List<Play> plays = node.GetAllPlays();
-            Play bestPlay = plays[rng.Next(0, plays.Count - 1)];
-            double bestUCB1 = double.MinValue;
-            foreach (var p in plays)
-            {
-                Node? child = node.children[p.Hash()].Item2 ?? throw new Exception("Child not expanded");
-                double UCB1 = child.UCB1(UCB1ExploreParam);
-                if (UCB1 > bestUCB1)
-                {
-                    bestPlay = p;
-                    bestUCB1 = UCB1;
-                }
-            }
-            node = node.GetChildNode(bestPlay);
+            Expand(leaf);
+            leaf = leaf.GetRandomChild();
         }
-        return node;
+        winner = Rollout(leaf);
+        Backpropogate(leaf, winner);
     }
 
-    public Node Expand(Node node)
+    /* Select a leaf node with max UCB1 value */
+    Node Select(Node root)
     {
-        List<Play> plays = node.GetUnexpandedPlays();
-        Play play = plays[rng.Next(0, plays.Count - 1)];
-
-        State childState = Game.GetNextState(node.state, play);
-        if (nodes.ContainsKey(childState.Hash()))
-            return nodes[childState.Hash()];
-
-        List<Play> childUnexpandedPlays = Game.GetLegalPlays(childState);
-        Node childNode = node.Expand(play, childState, childUnexpandedPlays);
-        nodes.Add(childState.Hash(), childNode);
-
-        return childNode;
+        while (!root.IsLeaf)
+            root = root.FindMaxUCB1Child(UCB1ExploreParam);
+        return root;
     }
 
-    public Player Simulate(Node node)
+    /* Create all possible child of the node */
+    static void Expand(Node leaf)
     {
-        State state = node.state;
+        if (!leaf.IsLeaf)
+            return;
+        List<Play> possiblePlays = Game.GetLegalPlays(leaf.state);
+        foreach (var play in possiblePlays)
+        {
+            State stateAfterPlay = Game.GetNextState(leaf.state, play);
+            leaf.children.Add(new Node(leaf, play, stateAfterPlay));
+        }
+    }
+
+    Player Rollout(Node leafNode)
+    {
+        State state = leafNode.state;
         Player winner = Game.CheckWinner(state);
 
+        if (leafNode.parent != null &&
+            winner == leafNode.parent.state.player &&
+            winner == root.state.player.Opponent())
+        {
+            /* leafNode represent the result of one of possible plays of
+               leafNode.parent.state.player, 
+               and this result is instantly making root player lose,
+               so leafNode.parent.parentPlayerPlay should not be selected afterward,
+               since if leafNode.parent.state.player is smart enough,
+               it will catch the chance. */
+            leafNode.parent.parentPlayerWins = int.MinValue;
+            return winner;
+        }
+
+        /* Randomly play until game complete */
         while (winner == Player.NONE)
         {
-            List<Play> plays = Game.GetLegalPlays(state);
-            Play play = plays[rng.Next(0, plays.Count-1)];
+            List<Play> possiblePlays = Game.GetLegalPlays(state);
+            Play play = possiblePlays[rng.Next(0, possiblePlays.Count - 1)];
+
             state = Game.GetNextState(state, play);
             winner = Game.CheckWinner(state);
         }
@@ -206,29 +170,27 @@ public class UCT(int UCB1ExploreParam = 2)
         return winner;
     }
 
-    public static void Backpropagate(Node? node, Player winner)
+    static void Backpropogate(Node leafNode, Player winner)
     {
-        while (node != null) {
-            node.plays++;
-            // Parent's choice
-            if (node.state.player == winner.Opposite())
-                node.wins++;
+        Node? node = leafNode;
+        while (node != null)
+        {
+            if (node.state.player.Opponent() == winner)
+                node.parentPlayerWins++;
+            node.totalPlays++;
+
             node = node.parent;
         }
     }
+}
 
-    public string GetStats(State state) {
-        Node node = nodes[state.Hash()];
-        // State stats = { n_plays: node.n_plays, n_wins: node.n_wins, children: [] }
-        string stats = node.state.player.ToStr() + node.wins + "/" + node.plays;
-        stats += Environment.NewLine;
-        foreach (var tuple in node.children.Values)
-        {
-            Node? tmp = tuple.Item2;
-            if (tmp != null && tmp.play != null)
-                stats += tmp.state.player.ToStr() + tmp.play?.Hash() + ":" + tmp.wins + "/" + tmp.plays;
-            stats += Environment.NewLine;
-        }
-        return stats;
+public static class MCTS
+{
+    /* Search the next play by MCTS */
+    public static Play Search(State currentState, int iteration, Policy policy)
+    {
+        UCT tree = new(new Node(null, null, currentState), 2);
+        tree.Search(iteration);
+        return tree.GetBestPlay(policy);
     }
 }

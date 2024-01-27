@@ -1,48 +1,46 @@
 ﻿using MCTS;
 
-const int TotalGame = 1;
-int player1Wins = 0;
-int player2Wins = 0;
-int ties = 0;
-int gameCount = TotalGame;
+const int TotalGame = 1000;
+int Player1Wins = 0;
+int Player2Wins = 0;
+int Tie = 0;
+int game = TotalGame;
 
 Player first = Player.ONE;
 
-UCT mcts = new();
-State state = Game.Init(first);
-
-while (gameCount-- > 0)
+while (game-- > 0)
 {
-    // UCT mcts = new();
-
-    state = Game.Init(first);
+    State state = Game.Init(first);
     Player winner = Game.CheckWinner(state);
+
     while (winner == Player.NONE)
     {
-        mcts.RunSearch(state, 3000);
+        // Console.Write(state.board.ToStr());
 
-        Console.Write(state.HistoryToStr());
-        Console.Write(mcts.GetStats(state));
+        // Console.WriteLine();
 
-        Play play = mcts.GetBestPlay(state, UCTPolicy.MaxPlay);
+        // Console.WriteLine("Player: {0}", state.player.ToStr());
+        Play play = MCTS.MCTS.Search(state, 2000, Policy.WinRate);
+        // Console.WriteLine("Choose: {0}", play.ToStr());
+
         state = Game.GetNextState(state, play);
         winner = Game.CheckWinner(state);
-    }
-    if (winner == Player.ONE)
-        player1Wins++;
-    else if (winner == Player.TWO)
-        player2Wins++;
-    else
-        ties++;
 
-    first = first.Opposite();
+        // Console.WriteLine();
+    }
+
+    // Console.Write(state.board.ToStr());
+    // Console.WriteLine();
+    // Console.WriteLine("Winner: {0}", winner.ToStr());
+
+    if (winner == Player.ONE)
+        Player1Wins++;
+    else if (winner == Player.TWO)
+        Player2Wins++;
+    else
+        Tie++;
 }
 
-Console.Write(state.HistoryToStr());
-// state = Game.Init(first);
-// Console.WriteLine(state.Hash());
-Console.Write(mcts.GetStats(state));
-Console.WriteLine(player1Wins);
-Console.WriteLine(player2Wins);
-Console.WriteLine(ties);
-Console.WriteLine(mcts.nodes.Count);
+Console.WriteLine("Player O Wins: {0}", Player1Wins);
+Console.WriteLine("Player X Wins: {0}", Player2Wins);
+Console.WriteLine("Ties: {0}", Tie);

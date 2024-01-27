@@ -13,7 +13,7 @@ public static class PlayerExtension
             _ => " ",
         };
     }
-    public static Player Opposite(this Player player)
+    public static Player Opponent(this Player player)
     {
         if (player == Player.NONE || player == Player.TIE)
             return player;
@@ -42,22 +42,22 @@ public static class PlayerExtension
 /* Store information of a play */
 public readonly struct Play(int idx)
 {
-    public readonly int idx = idx; // 0 ~ 8
-    public string Hash() => idx.ToString();
+    public readonly int idx = idx; // 棋要下在哪裡：0 ~ 8
+    public string ToStr() => idx.ToString();
 }
 
 /* Store information of a game state */
 public class State(List<Play> history, Player[] board, Player player)
 {
     public readonly List<Play> history = history;
-    public readonly Player player = player;
-    public readonly Player[] board = board;
+    public readonly Player player = player; // 現在換誰下棋
+    public readonly Player[] board = board; // 現在要下棋的人面對的局面
 
     public string Hash()
     {
         string hash = player.ToStr();
         foreach (var p in history)
-            hash += p.Hash();
+            hash += p.ToStr();
         return hash;
     }
 
@@ -65,12 +65,12 @@ public class State(List<Play> history, Player[] board, Player player)
     {
         List<Player[]> boards = [new Player[9]];
         int last = 0;
-        Player player = history.Count % 2 == 1 ? this.player.Opposite() : this.player;
+        Player player = history.Count % 2 == 1 ? this.player.Opponent() : this.player;
         foreach (var p in history)
         {
             Player[] board = (Player[])boards[last].Clone();
             board[p.idx] = player;
-            player = player.Opposite();
+            player = player.Opponent();
             boards.Add(board);
             last++;
         }
@@ -92,83 +92,70 @@ public class State(List<Play> history, Player[] board, Player player)
 
 public class Game
 {
-    /* Generate and return the initial game state */
-    public static State Init(Player player) => new([], new Player[9], player);
+    /* Generate a new empty board and assign firstMover as the first mover */
+    public static State Init(Player firstMover) => new([], new Player[9], firstMover);
 
     /* Return the current player's legal plays from given state */
     public static List<Play> GetLegalPlays(State state)
     {
         List<Play> legalPlays = [];
 
-        int none = 0;
-
         for (int id = 0; id < 9; id++)
             if (state.board[id] == Player.NONE)
             {
                 legalPlays.Add(new Play(id));
-                none++;
             }
-
-        // cut some symmetric
-        if (none == 9)
-            return [new(0), new(1), new(4)];
-        if (none == 8 && state.board[4] != Player.NONE)
-            return [new(0), new(1)];
 
         return legalPlays;
     }
 
-    /* Advance the given state and return it */
-    public static State GetNextState(State currentState, Play play)
+    /* Apply newPlay on currentState & return that state */
+    public static State GetNextState(State currentState, Play newPlay)
     {
         // copy history to new list & push play to it
-        List<Play> newHistory = new(currentState.history) { play };
+        List<Play> newHistory = new(currentState.history) { newPlay };
         // copy board to new array
         Player[] newBoard = (Player[])currentState.board.Clone();
         // apply the play on new board
-        newBoard[play.idx] = currentState.player;
+        newBoard[newPlay.idx] = currentState.player;
         // create new state of new history & new board, player is changed since this is next turn
-        return new State(newHistory, newBoard, currentState.player.Opposite());
+        return new State(newHistory, newBoard, currentState.player.Opponent());
     }
+
+    static readonly List<List<int>> checks = [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+        [0, 3, 6],
+        [1, 4, 7],
+        [2, 5, 8],
+        [0, 4, 8],
+        [2, 4, 6]
+    ];
 
     /* Check and return the winner of the game */
     public static Player CheckWinner(State state)
     {
-        List<List<int>> checks = [
-            [0, 1, 2],
-            [3, 4, 5],
-            [6, 7, 8],
-            [0, 3, 6],
-            [1, 4, 7],
-            [2, 5, 8],
-            [0, 4, 8],
-            [2, 4, 6]
-        ];
-
-        for (var i = 0; i < checks.Count; i++)
+        bool checkLine(List<int> line, Player id)
         {
-            var check = checks[i];
-            List<Player> checkArr = [];
-            for (var j = 0; j < check.Count; j++)
-                checkArr.Add(state.board[check[j]]);
+            for (int j = 0; j < line.Count; j++)
+                if (state.board[line[j]] != id)
+                    return false;
+            return true;
+        }
 
-            bool every(Player id)
-            {
-                foreach (var p in checkArr)
-                    if (p != id)
-                        return false;
-                return true;
-            }
-
-            if (every(Player.ONE))
+        for (int i = 0; i < checks.Count; i++)
+        {
+            if (checkLine(checks[i], Player.ONE))
                 return Player.ONE;
-            if (every(Player.TWO))
+            if (checkLine(checks[i], Player.TWO))
                 return Player.TWO;
         }
 
         if (state.board.IsFull())
             return Player.TIE;
 
+        // game is not complete yet
         return Player.NONE;
     }
 }

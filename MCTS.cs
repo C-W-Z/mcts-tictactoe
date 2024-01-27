@@ -1,24 +1,14 @@
 namespace MCTS;
 
 /* Monte Carlo Search Tree Node (using UCB1) */
-class Node
+class Node(Node? parent, Play? parentPlay, State state)
 {
-    public State state; // 這個node代表的state: 現在的局面和現在是誰要下下一步棋
-    public Play? parentPlayerPlay; // (上個人下的)上一步棋是什麼
-    public int parentPlayerWins; // 這個Node(含)以下的模擬中，上個人贏了幾次
-    public int totalPlays; // 這個Node(含)以下模擬了幾次
-    public Node? parent;
-    public List<Node> children;
-
-    public Node(Node? parent, Play? parentPlay, State state)
-    {
-        this.parentPlayerPlay = parentPlay;
-        this.state = state;
-        this.parent = parent;
-        this.parentPlayerWins = 0;
-        this.totalPlays = 0;
-        this.children = [];
-    }
+    public readonly State state = state; // 這個node代表的state: 現在的局面和現在是誰要下下一步棋
+    public readonly Play? parentPlayerPlay = parentPlay; // (上個人下的)上一步棋是什麼
+    public int parentPlayerWins = 0; // 這個Node(含)以下的模擬中，上個人贏了幾次
+    public int totalPlays = 0; // 這個Node(含)以下模擬了幾次
+    public readonly Node? parent = parent;
+    public readonly List<Node> children = [];
 
     public bool IsLeaf => children.Count == 0;
 
@@ -28,8 +18,8 @@ class Node
             return 0;
         if (totalPlays == 0) // if this node has not explored yet
             return double.MaxValue;
-        if (parentPlayerWins == int.MinValue)
-            return double.MinValue;
+        if (parentPlayerWins < 0)
+            return parentPlayerWins;
         double exploit = (double)parentPlayerWins / totalPlays;
         double explore = Math.Sqrt(UCB1ExploreParam * Math.Log(parent.totalPlays) / totalPlays);
         return exploit + explore;
@@ -37,8 +27,9 @@ class Node
 
     public Node FindMaxUCB1Child(double UCB1ExploreParam)
     {
-        Node res = children[0];
-        double maxUCB = double.MinValue;
+        Random rng = new();
+        Node res = children[rng.Next(0, children.Count - 1)];
+        double maxUCB = res.UCB1(UCB1ExploreParam);
         foreach (var n in children)
         {
             double newUCB = n.UCB1(UCB1ExploreParam);
@@ -48,8 +39,6 @@ class Node
                 maxUCB = newUCB;
             }
         }
-        // if (res == null)
-        //     throw new Exception("Child not found");
         return res;
     }
 
@@ -63,10 +52,10 @@ class Node
 public enum Policy { WinRate, MaxPlay }
 
 /* Monte Carlo Search Tree (using UCB1) */
-class UCT(Node root, int UCB1ExploreParam = 2)
+class UCT(Node root, double UCB1ExploreParam = 2)
 {
     // The square of the bias parameter in the UCB1 algorithm
-    readonly int UCB1ExploreParam = UCB1ExploreParam;
+    readonly double UCB1ExploreParam = UCB1ExploreParam;
     readonly Random rng = new(Guid.NewGuid().GetHashCode());
     readonly Node root = root;
 
@@ -103,7 +92,7 @@ class UCT(Node root, int UCB1ExploreParam = 2)
         while (iteration-- > 0)
             Iterate();
     }
-    
+
     void Iterate()
     {
         Node leaf = Select(root);
@@ -143,6 +132,14 @@ class UCT(Node root, int UCB1ExploreParam = 2)
         State state = leafNode.state;
         Player winner = Game.CheckWinner(state);
 
+        if (winner == leafNode.state.player &&
+            winner == root.state.player.Opponent())
+        {
+            /* Here means that root player(leafNode.parent.state.player)
+               will instantly lose if it choose this play(leafNode.parentPlayerPlay),
+               so this node should not be choose afterward. */
+            leafNode.parentPlayerWins = -2;
+        }
         if (leafNode.parent != null &&
             winner == leafNode.parent.state.player &&
             winner == root.state.player.Opponent())
@@ -153,8 +150,7 @@ class UCT(Node root, int UCB1ExploreParam = 2)
                so leafNode.parent.parentPlayerPlay should not be selected afterward,
                since if leafNode.parent.state.player is smart enough,
                it will catch the chance. */
-            leafNode.parent.parentPlayerWins = int.MinValue;
-            return winner;
+            leafNode.parent.parentPlayerWins = -1;
         }
 
         /* Randomly play until game complete */
@@ -187,9 +183,9 @@ class UCT(Node root, int UCB1ExploreParam = 2)
 public static class MCTS
 {
     /* Search the next play by MCTS */
-    public static Play Search(State currentState, int iteration, Policy policy)
+    public static Play Search(State currentState, int iteration, Policy policy = Policy.MaxPlay, double UCB1ExploreParam = 2)
     {
-        UCT tree = new(new Node(null, null, currentState), 2);
+        UCT tree = new(new Node(null, null, currentState), UCB1ExploreParam);
         tree.Search(iteration);
         return tree.GetBestPlay(policy);
     }

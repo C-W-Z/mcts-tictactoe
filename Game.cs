@@ -53,14 +53,6 @@ public class State(List<Play> history, Player[] board, Player player)
     public readonly Player player = player; // 現在換誰下棋
     public readonly Player[] board = board; // 現在要下棋的人面對的局面
 
-    public string Hash()
-    {
-        string hash = player.ToStr();
-        foreach (var p in history)
-            hash += p.ToStr();
-        return hash;
-    }
-
     public string HistoryToStr()
     {
         List<Player[]> boards = [new Player[9]];
@@ -93,7 +85,7 @@ public class State(List<Play> history, Player[] board, Player player)
 public class Game
 {
     /* Generate a new empty board and assign firstMover as the first mover */
-    public static State Init(Player firstMover) => new([], new Player[9], firstMover);
+    public static State GetInitState(Player firstMover) => new([], new Player[9], firstMover);
 
     /* Return the current player's legal plays from given state */
     public static List<Play> GetLegalPlays(State state)
@@ -102,9 +94,7 @@ public class Game
 
         for (int id = 0; id < 9; id++)
             if (state.board[id] == Player.NONE)
-            {
                 legalPlays.Add(new Play(id));
-            }
 
         return legalPlays;
     }
@@ -136,6 +126,9 @@ public class Game
     /* Check and return the winner of the game */
     public static Player CheckWinner(State state)
     {
+        if (state.board[4] != Player.NONE && !state.board.IsFull())
+            return state.board[4].Opponent();
+
         bool checkLine(List<int> line, Player id)
         {
             for (int j = 0; j < line.Count; j++)

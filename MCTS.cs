@@ -8,7 +8,7 @@ public class Node
     public int wins;
     public int plays;
     public Node? parent;
-    public Dictionary<Play, Node?> children;
+    public Dictionary<string, Tuple<Play, Node?>> children;
 
     public Node(Play? play, State state, Node? parent, List<Play> unexpandedPlays)
     {
@@ -19,16 +19,16 @@ public class Node
         this.plays = 0;
         this.children = [];
         foreach (var p in unexpandedPlays)
-            children.Add(p, null);
+            children.Add(p.Hash(), new(p, null));
     }
 
     public Node GetChildNode(Play play)
     {
-        if (children.TryGetValue(play, out Node? node))
+        if (children.TryGetValue(play.Hash(), out var tuple))
         {
-            if (node == null)
+            if (tuple.Item2 == null)
                 throw new Exception("Such child is not expanded.");
-            return node;
+            return tuple.Item2;
         }
         throw new Exception("No such play.");
     }
@@ -36,31 +36,31 @@ public class Node
     public Node Expand(Play play, State state, List<Play> unexpandedPlays)
     {
         Node child = new(play, state, this, unexpandedPlays);
-        children[play] = child; // will throw KeyNotFoundException if play is not found
+        children[play.Hash()] = new(play, child);
         return child;
     }
 
     public List<Play> GetAllPlays()
     {
         List<Play> allPlays = [];
-        foreach (var key in children.Keys)
-            allPlays.Add(key);
+        foreach (var tuple in children.Values)
+            allPlays.Add(tuple.Item1);
         return allPlays;
     }
 
     public List<Play> GetUnexpandedPlays()
     {
         List<Play> unexpandedPlays = [];
-        foreach (var keyNVal in children)
-            if (keyNVal.Value == null)
-                unexpandedPlays.Add(keyNVal.Key);
+        foreach (var tuple in children.Values)
+            if (tuple.Item2 == null)
+                unexpandedPlays.Add(tuple.Item1);
         return unexpandedPlays;
     }
 
     public bool IsFullyExpanded()
     {
-        foreach (var val in children.Values)
-            if (val == null)
+        foreach (var tuple in children.Values)
+            if (tuple.Item2 == null)
                 return false;
         return true;
     }
@@ -69,7 +69,7 @@ public class Node
 
     public double UCB1(double UCB1ExploreParam)
     {
-        if (parent == null || parent.plays == 0 || plays == 0)
+        if (parent == null)
             return 0;
         return (double)wins / plays + Math.Sqrt(UCB1ExploreParam * Math.Log10(parent.plays) / plays);
     }
@@ -82,17 +82,17 @@ public class UCT(int UCB1ExploreParam = 2)
 {
     // The square of the bias parameter in the UCB1 algorithm
     readonly int UCB1ExploreParam = UCB1ExploreParam;
-    readonly Dictionary<State, Node> nodes = [];
+    public readonly Dictionary<string, Node> nodes = [];
 
-    readonly Random rng = new();
+    readonly Random rng = new(Guid.NewGuid().GetHashCode());
 
     public void MakeNode(State state)
     {
-        if (nodes.ContainsKey(state))
+        if (nodes.ContainsKey(state.Hash()))
             return;
         List<Play> unexpandedPlays = Game.GetLegalPlays(state);
         Node node = new(null, state, null, unexpandedPlays);
-        nodes.Add(state, node);
+        nodes.TryAdd(state.Hash(), node);
     }
 
     public void RunSearch(State state, int time = 1000)
@@ -116,10 +116,10 @@ public class UCT(int UCB1ExploreParam = 2)
         MakeNode(state);
 
         // If not all children are expanded, not enough information
-        if (!nodes[state].IsFullyExpanded())
+        if (!nodes[state.Hash()].IsFullyExpanded())
             throw new Exception("Not enough information!");
 
-        Node node = nodes[state];
+        Node node = nodes[state.Hash()];
         List<Play> allPlays = node.GetAllPlays();
 
         Play bestPlay = allPlays[rng.Next(0, allPlays.Count - 1)];
@@ -153,15 +153,15 @@ public class UCT(int UCB1ExploreParam = 2)
 
     public Node Select(State state)
     {
-        Node node = nodes[state];
+        Node node = nodes[state.Hash()];
         while (!node.IsLeaf && node.IsFullyExpanded())
         {
             List<Play> plays = node.GetAllPlays();
-            Play bestPlay = plays[rng.Next(0, plays.Count - 1)];;
+            Play bestPlay = plays[rng.Next(0, plays.Count - 1)];
             double bestUCB1 = double.MinValue;
             foreach (var p in plays)
             {
-                Node? child = node.children[p] ?? throw new Exception("Child not expanded");
+                Node? child = node.children[p.Hash()].Item2 ?? throw new Exception("Child not expanded");
                 double UCB1 = child.UCB1(UCB1ExploreParam);
                 if (UCB1 > bestUCB1)
                 {
@@ -180,9 +180,12 @@ public class UCT(int UCB1ExploreParam = 2)
         Play play = plays[rng.Next(0, plays.Count - 1)];
 
         State childState = Game.GetNextState(node.state, play);
+        if (nodes.ContainsKey(childState.Hash()))
+            return nodes[childState.Hash()];
+
         List<Play> childUnexpandedPlays = Game.GetLegalPlays(childState);
         Node childNode = node.Expand(play, childState, childUnexpandedPlays);
-        nodes.Add(childState, childNode);
+        nodes.Add(childState.Hash(), childNode);
 
         return childNode;
     }
@@ -212,5 +215,20 @@ public class UCT(int UCB1ExploreParam = 2)
                 node.wins++;
             node = node.parent;
         }
+    }
+
+    public string GetStats(State state) {
+        Node node = nodes[state.Hash()];
+        // State stats = { n_plays: node.n_plays, n_wins: node.n_wins, children: [] }
+        string stats = node.state.player.ToStr() + node.wins + "/" + node.plays;
+        stats += Environment.NewLine;
+        foreach (var tuple in node.children.Values)
+        {
+            Node? tmp = tuple.Item2;
+            if (tmp != null && tmp.play != null)
+                stats += tmp.state.player.ToStr() + tmp.play?.Hash() + ":" + tmp.wins + "/" + tmp.plays;
+            stats += Environment.NewLine;
+        }
+        return stats;
     }
 }

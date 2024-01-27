@@ -15,59 +15,105 @@ public static class PlayerExtension
     }
     public static Player Opposite(this Player player)
     {
-        if (player == Player.NONE)
-            return Player.NONE;
+        if (player == Player.NONE || player == Player.TIE)
+            return player;
         return player == Player.ONE ? Player.TWO : Player.ONE;
     }
-    public static bool IsFull(this Player[,] board)
+    public static bool IsFull(this Player[] board)
     {
         foreach (var piece in board)
             if (piece == Player.NONE)
                 return false;
         return true;
     }
-    public static string Log(this Player[,] board)
+    public static string ToStr(this Player[] board)
     {
-        string log = "";
+        string res = "";
         for (int i = 0; i < 3; i++)
         {
             for (int j = 0; j < 3; j++)
-                log += board[i, j].ToStr();
-            log += Environment.NewLine;
+                res += board[i * 3 + j].ToStr();
+            res += Environment.NewLine;
         }
-        return log;
+        return res;
     }
 }
 
 /* Store information of a play */
-public class Play(int row, int col)
+public readonly struct Play(int idx)
 {
-    public readonly int row = row;
-    public readonly int col = col;
+    public readonly int idx = idx; // 0 ~ 8
+    public string Hash() => idx.ToString();
 }
 
 /* Store information of a game state */
-public class State(List<Play> history, Player[,] board, Player player)
+public class State(List<Play> history, Player[] board, Player player)
 {
     public readonly List<Play> history = history;
     public readonly Player player = player;
-    public readonly Player[,] board = board;
+    public readonly Player[] board = board;
+
+    public string Hash()
+    {
+        string hash = player.ToStr();
+        foreach (var p in history)
+            hash += p.Hash();
+        return hash;
+    }
+
+    public string HistoryToStr()
+    {
+        List<Player[]> boards = [new Player[9]];
+        int last = 0;
+        Player player = history.Count % 2 == 1 ? this.player.Opposite() : this.player;
+        foreach (var p in history)
+        {
+            Player[] board = (Player[])boards[last].Clone();
+            board[p.idx] = player;
+            player = player.Opposite();
+            boards.Add(board);
+            last++;
+        }
+        string[] line = ["|", "|", "|"];
+        boards.RemoveAt(0);
+        foreach (var b in boards)
+            for (int i = 0; i < 3; i++)
+            {
+                for (int j = 0; j < 3; j++)
+                    line[i] += b[i * 3 + j].ToStr();
+                line[i] += '|';
+            }
+        string res = "";
+        for (int i = 0; i < 3; i++)
+            res += line[i] + Environment.NewLine;
+        return res;
+    }
 }
 
 public class Game
 {
     /* Generate and return the initial game state */
-    public static State Init(Player player) => new([], new Player[3, 3], player);
+    public static State Init(Player player) => new([], new Player[9], player);
 
     /* Return the current player's legal plays from given state */
     public static List<Play> GetLegalPlays(State state)
     {
         List<Play> legalPlays = [];
 
-        for (int row = 0; row < 3; row++)
-            for (int col = 0; col < 3; col++)
-                if (state.board[row, col] == Player.NONE)
-                    legalPlays.Add(new Play(row, col));
+        int none = 0;
+
+        for (int id = 0; id < 9; id++)
+            if (state.board[id] == Player.NONE)
+            {
+                legalPlays.Add(new Play(id));
+                none++;
+            }
+
+        // cut some symmetric
+        if (none == 9)
+            return [new(0), new(1), new(4)];
+        if (none == 8 && state.board[4] != Player.NONE)
+            return [new(0), new(1)];
 
         return legalPlays;
     }
@@ -78,9 +124,9 @@ public class Game
         // copy history to new list & push play to it
         List<Play> newHistory = new(currentState.history) { play };
         // copy board to new array
-        Player[,] newBoard = (Player[,])currentState.board.Clone();
+        Player[] newBoard = (Player[])currentState.board.Clone();
         // apply the play on new board
-        newBoard[play.row, play.col] = currentState.player;
+        newBoard[play.idx] = currentState.player;
         // create new state of new history & new board, player is changed since this is next turn
         return new State(newHistory, newBoard, currentState.player.Opposite());
     }
@@ -88,29 +134,37 @@ public class Game
     /* Check and return the winner of the game */
     public static Player CheckWinner(State state)
     {
-        for (int i = 0; i < 3; i++)
+        List<List<int>> checks = [
+            [0, 1, 2],
+            [3, 4, 5],
+            [6, 7, 8],
+            [0, 3, 6],
+            [1, 4, 7],
+            [2, 5, 8],
+            [0, 4, 8],
+            [2, 4, 6]
+        ];
+
+        for (var i = 0; i < checks.Count; i++)
         {
-            if (state.board[i, 0] != Player.NONE &&
-                state.board[i, 0] == state.board[i, 1] &&
-                state.board[i, 0] == state.board[i, 2])
-                return state.board[i, 0];
+            var check = checks[i];
+            List<Player> checkArr = [];
+            for (var j = 0; j < check.Count; j++)
+                checkArr.Add(state.board[check[j]]);
 
-            if (state.board[0, i] != Player.NONE &&
-                state.board[0, i] == state.board[1, i] &&
-                state.board[0, i] == state.board[2, i])
-                return state.board[0, i];
+            bool every(Player id)
+            {
+                foreach (var p in checkArr)
+                    if (p != id)
+                        return false;
+                return true;
+            }
+
+            if (every(Player.ONE))
+                return Player.ONE;
+            if (every(Player.TWO))
+                return Player.TWO;
         }
-
-        if (state.board[1, 1] == Player.NONE)
-            return Player.NONE;
-
-        if (state.board[1, 1] == state.board[0, 0] &&
-            state.board[1, 1] == state.board[2, 2])
-            return state.board[1, 1];
-
-        if (state.board[1, 1] == state.board[0, 2] &&
-            state.board[1, 1] == state.board[2, 0])
-            return state.board[1, 1];
 
         if (state.board.IsFull())
             return Player.TIE;

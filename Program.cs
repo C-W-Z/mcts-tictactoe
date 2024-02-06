@@ -1,6 +1,6 @@
 ﻿using MCTS;
 
-const int TotalGame = 1;
+const int TotalGame = 100;
 int Player1Wins = 0;
 int Player2Wins = 0;
 int Tie = 0;
@@ -23,7 +23,7 @@ while (game-- > 0)
             Console.WriteLine("Player: {0}", state.player.ToStr());
         }
 
-        Play play = MCTS.MCTS.Search(state, 10000, Policy.WinRate, 2);
+        Move play = MCTS.MCTS.Search(state, 500, Policy.WinRate, Math.Sqrt(2));
 
         if (!hasPrint)
             Console.WriteLine("Choose: {0}", play.ToStr());

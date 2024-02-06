@@ -1,12 +1,12 @@
 namespace MCTS;
 
 /* Monte Carlo Search Tree Node (using UCB1) */
-class Node(Node? parent, Play? parentPlay, State state)
+class Node(Node? parent, Move? parentMove, State state)
 {
     public readonly State state = state; // 這個node代表的state: 現在的局面和現在是誰要下下一步棋
-    public readonly Play? parentPlayerPlay = parentPlay; // (上個人下的)上一步棋是什麼
-    public int parentPlayerWins = 0; // 這個Node(含)以下的模擬中，上個人贏了幾次
-    public int totalPlays = 0; // 這個Node(含)以下模擬了幾次
+    public readonly Move? parentPlayerMove = parentMove; // (上個人下的)上一步棋是什麼
+    public double parentPlayerScore = 0; // 這個Node(含)以下的模擬中，上個人贏了幾次
+    public int rolloutTimes = 0; // 這個Node(含)以下模擬了幾次
     public readonly Node? parent = parent;
     public readonly List<Node> children = [];
 
@@ -16,13 +16,13 @@ class Node(Node? parent, Play? parentPlay, State state)
     {
         if (parent == null) // no needs to explore root node since it is the current actual game state
             return 0;
-        if (totalPlays == 0) // if this node has not explored yet
+        if (rolloutTimes == 0) // if this node has not explored yet
             return double.MaxValue;
-        if (parentPlayerWins < 0)
-            return parentPlayerWins;
-        double exploit = (double)parentPlayerWins / totalPlays;
-        double explore = Math.Sqrt(UCB1ExploreParam * Math.Log(parent.totalPlays) / totalPlays);
-        return exploit + explore;
+        if (parentPlayerScore < 0)
+            return parentPlayerScore;
+        double exploit = parentPlayerScore / rolloutTimes;
+        double explore = Math.Sqrt(Math.Log(parent.rolloutTimes) / rolloutTimes);
+        return exploit + UCB1ExploreParam * explore;
     }
 
     public Node FindMaxUCB1Child(double UCB1ExploreParam)
@@ -52,30 +52,29 @@ class Node(Node? parent, Play? parentPlay, State state)
 public enum Policy { WinRate, MaxPlay }
 
 /* Monte Carlo Search Tree (using UCB1) */
-class UCT(Node root, double UCB1ExploreParam = 2)
+class UCT(Node root, double UCB1ExploreParam)
 {
-    // The square of the bias parameter in the UCB1 algorithm
     readonly double UCB1ExploreParam = UCB1ExploreParam;
     readonly Random rng = new(Guid.NewGuid().GetHashCode());
     readonly Node root = root;
 
-    public Play GetBestPlay(Policy policy)
+    public Move GetBestPlay(Policy policy)
     {
-        Play? bestPlay = null;
+        Move? bestPlay = null;
         double max = double.MinValue;
         foreach (var child in root.children)
         {
-            if (policy == Policy.MaxPlay && child.totalPlays > max)
+            if (policy == Policy.MaxPlay && child.rolloutTimes > max)
             {
-                bestPlay = child.parentPlayerPlay;
-                max = child.totalPlays;
+                bestPlay = child.parentPlayerMove;
+                max = child.rolloutTimes;
             }
             else if (policy == Policy.WinRate)
             {
-                double rate = (double)child.parentPlayerWins / child.totalPlays;
+                double rate = (double)child.parentPlayerScore / child.rolloutTimes;
                 if (rate > max)
                 {
-                    bestPlay = child.parentPlayerPlay;
+                    bestPlay = child.parentPlayerMove;
                     max = rate;
                 }
             }
@@ -84,7 +83,7 @@ class UCT(Node root, double UCB1ExploreParam = 2)
         }
         if (bestPlay == null)
             throw new Exception("Play not found");
-        return (Play)bestPlay;
+        return (Move)bestPlay;
     }
 
     public void Search(int iteration)
@@ -97,7 +96,7 @@ class UCT(Node root, double UCB1ExploreParam = 2)
     {
         Node leaf = Select(root);
         Player winner = Game.CheckWinner(leaf.state);
-        if (winner == Player.NONE)
+        if (winner == Player.NONE && leaf.rolloutTimes > 0)
         {
             Expand(leaf);
             leaf = leaf.GetRandomChild();
@@ -119,7 +118,7 @@ class UCT(Node root, double UCB1ExploreParam = 2)
     {
         if (!leaf.IsLeaf)
             return;
-        List<Play> possiblePlays = Game.GetLegalPlays(leaf.state);
+        List<Move> possiblePlays = Game.GetLegalPlays(leaf.state);
         foreach (var play in possiblePlays)
         {
             State stateAfterPlay = Game.GetNextState(leaf.state, play);
@@ -138,7 +137,7 @@ class UCT(Node root, double UCB1ExploreParam = 2)
             /* Here means that root player(leafNode.parent.state.player)
                will instantly lose if it choose this play(leafNode.parentPlayerPlay),
                so this node should not be choose afterward. */
-            leafNode.parentPlayerWins = -2;
+            leafNode.parentPlayerScore = -2;
         }
         if (leafNode.parent != null &&
             winner == leafNode.parent.state.player &&
@@ -150,14 +149,14 @@ class UCT(Node root, double UCB1ExploreParam = 2)
                so leafNode.parent.parentPlayerPlay should not be selected afterward,
                since if leafNode.parent.state.player is smart enough,
                it will catch the chance. */
-            leafNode.parent.parentPlayerWins = -1;
+            leafNode.parent.parentPlayerScore = -1;
         }
 
         /* Randomly play until game complete */
         while (winner == Player.NONE)
         {
-            List<Play> possiblePlays = Game.GetLegalPlays(state);
-            Play play = possiblePlays[rng.Next(0, possiblePlays.Count - 1)];
+            List<Move> possiblePlays = Game.GetLegalPlays(state);
+            Move play = possiblePlays[rng.Next(0, possiblePlays.Count - 1)];
 
             state = Game.GetNextState(state, play);
             winner = Game.CheckWinner(state);
@@ -172,8 +171,10 @@ class UCT(Node root, double UCB1ExploreParam = 2)
         while (node != null)
         {
             if (node.state.player.Opponent() == winner)
-                node.parentPlayerWins++;
-            node.totalPlays++;
+                node.parentPlayerScore++;
+            else if (winner == Player.TIE)
+                node.parentPlayerScore += 0.5;
+            node.rolloutTimes++;
 
             node = node.parent;
         }
@@ -183,7 +184,7 @@ class UCT(Node root, double UCB1ExploreParam = 2)
 public static class MCTS
 {
     /* Search the next play by MCTS */
-    public static Play Search(State currentState, int iteration, Policy policy = Policy.MaxPlay, double UCB1ExploreParam = 2)
+    public static Move Search(State currentState, int iteration, Policy policy = Policy.MaxPlay, double UCB1ExploreParam = 2)
     {
         UCT tree = new(new Node(null, null, currentState), UCB1ExploreParam);
         tree.Search(iteration);
